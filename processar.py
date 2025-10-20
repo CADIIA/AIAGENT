@@ -7,12 +7,16 @@ client = OpenAI(
     base_url="https://openrouter.ai/api/v1"
 )
 
-# Lê o arquivo de entrada
+# 🔄 Ajuste: compatibilidade com repository_dispatch (GitHub)
+# Se o arquivo 'entrada.json' contiver client_payload, extrai corretamente
 with open("entrada.json", "r", encoding="utf-8") as f:
     dados = json.load(f)
 
-numero = dados["numero"]
-mensagem = dados["mensagem"].strip()
+if "client_payload" in dados:
+    dados = dados["client_payload"]
+
+numero = dados.get("numero", "").strip()
+mensagem = dados.get("mensagem", "").strip()
 
 # 🔒 1️⃣ Ignora mensagens vindas de grupos
 if "-" in numero:
