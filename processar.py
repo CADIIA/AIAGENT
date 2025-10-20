@@ -55,3 +55,48 @@ if r.status_code == 200:
     print("✅ Mensagem enviada com sucesso!")
 else:
     print(f"❌ Erro ao enviar mensagem: {r.text}")
+
+
+
+# =========================================================
+# 🔁 BLOCO ADICIONADO — operação contínua 24/7
+# =========================================================
+
+import time, threading
+
+# Mantém logs ativos a cada 5 minutos
+def manter_logs():
+    while True:
+        print("🟢 Agente ativo —", time.strftime("%H:%M:%S"))
+        time.sleep(300)
+
+threading.Thread(target=manter_logs, daemon=True).start()
+
+# Reinicia o workflow automaticamente antes de encerrar
+def manter_ativo():
+    repo = os.getenv("GITHUB_REPOSITORY", "NatureIA/AIAGENT")
+    token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
+    if not token:
+        print("⚠️ Sem token do GitHub, não é possível reiniciar.")
+        return
+    url = f"https://api.github.com/repos/{repo}/actions/workflows/whatsapp.yml/dispatches"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json"
+    }
+    payload = {"ref": "main"}
+    try:
+        print("⏳ Preparando novo ciclo de execução...")
+        r = requests.post(url, headers=headers, json=payload)
+        if r.status_code == 204:
+            print("✅ Novo ciclo iniciado com sucesso (agente contínuo).")
+        else:
+            print(f"⚠️ Falha ao reiniciar: {r.status_code} - {r.text}")
+    except Exception as e:
+        print(f"Erro ao reiniciar ciclo: {e}")
+
+# Chama reinício automático
+manter_ativo()
+
+print("🏁 Execução finalizada — ciclo contínuo garantido.")
+
