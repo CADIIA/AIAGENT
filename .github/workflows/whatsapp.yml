@@ -2,6 +2,8 @@ name: Agente WhatsApp GPT
 
 on:
   workflow_dispatch:
+  repository_dispatch:
+    types: [mensagem_recebida]
   push:
     paths:
       - 'entrada.json'
@@ -15,6 +17,10 @@ jobs:
 
       - name: Instalar dependências
         run: pip install openai requests
+
+      - name: Criar entrada.json
+        run: |
+          echo '${{ toJson(github.event.client_payload) }}' > entrada.json
 
       - name: Rodar agente
         env:
@@ -35,4 +41,3 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.repository }}/actions/workflows/whatsapp.yml/dispatches \
             -d '{"ref": "main"}'
-
