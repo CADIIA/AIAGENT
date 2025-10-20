@@ -1,6 +1,7 @@
 name: Agente WhatsApp GPT
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'entrada.json'
@@ -8,20 +9,30 @@ on:
 jobs:
   responder:
     runs-on: ubuntu-latest
+    timeout-minutes: 355  # 5h55 — antes do limite de 6h
     steps:
       - uses: actions/checkout@v4
+
       - name: Instalar dependências
         run: pip install openai requests
+
       - name: Rodar agente
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ZAPI_INSTANCE: ${{ secrets.ZAPI_INSTANCE }}
           ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python processar.py
-      - name: Commitar resultado
+
+      - name: Auto-reiniciar workflow
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config --global user.name "Agente IA"
-          git config --global user.email "bot@github.com"
-          git add saida.json
-          git commit -m "Resposta automática"
-          git push
+          echo "⏳ Reiniciando próximo ciclo..."
+          curl -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/whatsapp.yml/dispatches \
+            -d '{"ref": "main"}'
+
