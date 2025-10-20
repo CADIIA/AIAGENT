@@ -1,0 +1,27 @@
+name: Agente WhatsApp GPT
+
+on:
+  push:
+    paths:
+      - 'entrada.json'
+
+jobs:
+  responder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar dependências
+        run: pip install openai requests
+      - name: Rodar agente
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ZAPI_INSTANCE: ${{ secrets.ZAPI_INSTANCE }}
+          ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
+        run: python processar.py
+      - name: Commitar resultado
+        run: |
+          git config --global user.name "Agente IA"
+          git config --global user.email "bot@github.com"
+          git add saida.json
+          git commit -m "Resposta automática"
+          git push
