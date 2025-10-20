@@ -1,7 +1,11 @@
 import json, os, requests
 from openai import OpenAI
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# ✅ Ajustado para usar o OpenRouter corretamente
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    base_url="https://openrouter.ai/api/v1"
+)
 
 # Lê o arquivo de entrada
 with open("entrada.json", "r", encoding="utf-8") as f:
@@ -99,4 +103,3 @@ def manter_ativo():
 manter_ativo()
 
 print("🏁 Execução finalizada — ciclo contínuo garantido.")
-
