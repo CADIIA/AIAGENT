@@ -130,3 +130,4 @@ while True:
     except Exception as e:
         print(f"❌ Loop erro: {e}")
         time.sleep(5)
+
