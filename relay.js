@@ -17,7 +17,8 @@ console.log("🟢 Relay ativo — monitorando mensagens Z-API a cada 10s...");
 async function verificarMensagens() {
   try {
     // ✅ endpoint garantido para mensagens não lidas
-    const url = `https://api.z-api.io/instances/3E90044E4208814E1C7FB2D7C430F359/token/9C148581C196611C25E60117/send-text`;
+    const url = `https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/messages`;
+
     const res = await fetch(url);
     const msgs = await res.json();
 
@@ -67,4 +68,5 @@ async function verificarMensagens() {
 
 setInterval(verificarMensagens, 10000);
 verificarMensagens();
+
 
