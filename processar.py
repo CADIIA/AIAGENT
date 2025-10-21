@@ -3,109 +3,128 @@ import time
 import requests
 from openai import OpenAI
 
-# ==============================
-# CONFIGURAÇÕES INICIAIS
-# ==============================
-print("🔍 DEBUG — Variáveis de ambiente recebidas:")
-for k in ["ZAPI_INSTANCE", "ZAPI_TOKEN", "MASTER_PHONE", "OPENAI_API_KEY", "GH_TOKEN"]:
-    print(f"   {k}: {os.getenv(k)}")
+# ============================================================
+# ⚙️ CONFIGURAÇÃO DE AMBIENTE
+# ============================================================
+# Regras fixas do CADIIA:
+# 1️⃣ Nunca responder se a mensagem não contiver "zumo"
+# 2️⃣ Nunca responder em grupos comuns
+# 3️⃣ Atender qualquer solicitação do mestre (MASTER_PHONE)
+#     mesmo dentro de grupos, desde que contenha "zumo"
+# 4️⃣ Rodar 24/7 sem interrupções
+# 5️⃣ Nunca parar — com ou sem mensagens
+# ============================================================
 
 ZAPI_INSTANCE = os.getenv("ZAPI_INSTANCE")
 ZAPI_TOKEN = os.getenv("ZAPI_TOKEN")
-MASTER_PHONE = os.getenv("MASTER_PHONE", "00000000000")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-client = OpenAI(api_key=OPENAI_API_KEY)
+MASTER_PHONE = os.getenv("MASTER_PHONE", "00000000000")
 
 if not ZAPI_INSTANCE or not ZAPI_TOKEN:
-    print("❌ ERRO: Variáveis da Z-API ausentes.")
+    print("❌ ERRO: Variáveis ZAPI_INSTANCE e ZAPI_TOKEN ausentes!")
     exit(1)
 
-URL_BASE = f"https://api.z-api.io/instances/{ZAPI_INSTANCE}/token/{ZAPI_TOKEN}"
-print("✅ Ambiente pronto, iniciando CADIIA IA...")
+if not OPENAI_API_KEY:
+    print("❌ ERRO: OPENAI_API_KEY ausente!")
+    exit(1)
 
-# ==============================
-# FUNÇÕES
-# ==============================
-def verificar_mensagens():
-    """Busca novas mensagens (endpoint certo da tua instância)."""
+ZAPI_URL = f"https://api.z-api.io/instances/{ZAPI_INSTANCE}/token/{ZAPI_TOKEN}"
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+print("✅ CADIIA inicializado e conectado à Z-API.")
+print(f"📡 Instância: {ZAPI_INSTANCE}")
+print(f"📱 Mestre autorizado: {MASTER_PHONE}")
+print("♾️ Modo contínuo 24/7 ativo.\n")
+
+
+# ============================================================
+# 🧩 FUNÇÕES AUXILIARES
+# ============================================================
+
+def enviar_resposta(numero, texto):
+    """Envia mensagem de resposta via Z-API"""
     try:
-        r = requests.get(f"{URL_BASE}/messages", timeout=15)
-        print("📡 Status:", r.status_code)
+        payload = {
+            "phone": numero.replace("@c.us", "").replace("@g.us", ""),
+            "message": texto
+        }
+        r = requests.post(f"{ZAPI_URL}/send-text", json=payload, timeout=15)
+        print(f"📤 [{r.status_code}] Enviado para {numero}: {texto[:80]}...")
+    except Exception as e:
+        print(f"❌ Erro ao enviar resposta: {e}")
+
+
+def obter_mensagens():
+    """Obtém a última mensagem recebida via Z-API"""
+    try:
+        r = requests.get(f"{ZAPI_URL}/last-received-messages", timeout=15)
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, list) and len(data) > 0:
                 ultima = data[-1]
                 numero = ultima.get("chatId", "")
                 msg = ultima.get("body", "").strip()
-                print(f"📨 Nova mensagem recebida: {msg}")
-                return {"numero": numero, "mensagem": msg}
-        else:
-            print("⚠️ Resposta inesperada:", r.text)
+                return numero, msg
     except Exception as e:
-        print(f"⚠️ Erro ao verificar mensagens: {e}")
-    return None
+        print(f"⚠️ Erro ao buscar mensagens: {e}")
+    return None, None
 
 
-def enviar_resposta(numero, texto):
-    """Envia resposta de texto via Z-API."""
-    try:
-        payload = {
-            "phone": numero.replace("@c.us", "").replace("@g.us", ""),
-            "message": texto
-        }
-        r = requests.post(f"{URL_BASE}/send-text", json=payload, timeout=10)
-        print(f"📤 [{r.status_code}] Resposta enviada: {texto}")
-    except Exception as e:
-        print(f"❌ Erro ao enviar mensagem: {e}")
-
-
-def gerar_resposta_ia(mensagem):
-    """Usa GPT (OpenAI) para interpretar e responder à mensagem."""
+def gerar_resposta_ia(pergunta):
+    """Gera resposta com GPT (assistente CADIIA)"""
     try:
         resposta = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Você é o agente CADIIA, um assistente inteligente conectado ao WhatsApp. Responda de forma útil, natural e precisa."},
-                {"role": "user", "content": mensagem}
-            ],
-            temperature=0.7,
-            max_tokens=300
+                {"role": "system", "content": (
+                    "Você é o CADIIA — um assistente inteligente, "
+                    "obediente, objetivo e direto. Responda sempre em português, "
+                    "sem enrolação, e atenda a qualquer solicitação do mestre "
+                    "que contenha a palavra 'zumo'."
+                )},
+                {"role": "user", "content": pergunta}
+            ]
         )
         return resposta.choices[0].message.content.strip()
     except Exception as e:
-        print(f"⚠️ Erro ao gerar resposta IA: {e}")
-        return "⚠️ Falha ao gerar resposta inteligente."
+        print(f"⚠️ Erro na IA: {e}")
+        return "⚠️ Ocorreu um erro ao processar sua solicitação."
 
 
-# ==============================
-# LOOP PRINCIPAL
-# ==============================
-print("🟢 CADIIA ativo — ciclo contínuo iniciado...")
+# ============================================================
+# 🔁 LOOP PRINCIPAL — NUNCA PARA
+# ============================================================
+ultima_mensagem = ""
+print("🤖 CADIIA está online e monitorando mensagens com 'zumo'...\n")
 
 while True:
-    entrada = verificar_mensagens()
+    numero, msg = obter_mensagens()
 
-    if not entrada:
-        time.sleep(5)
+    # Mantém o loop vivo, mesmo sem mensagens
+    if not msg or msg == ultima_mensagem:
+        time.sleep(4)
         continue
 
-    numero = entrada["numero"]
-    msg = entrada["mensagem"].strip()
+    ultima_mensagem = msg
+    print(f"📩 Nova mensagem de {numero}: {msg}")
 
-    # Ignora mensagens sem "zumo"
+    # Regra 1️⃣ — Ignora mensagens sem "zumo"
     if "zumo" not in msg.lower():
-        time.sleep(2)
-        continue
-
-    # Bloqueia grupos que não sejam do mestre (se configurado)
-    if "@g.us" in numero and (MASTER_PHONE not in numero):
-        print("⏸ Ignorado — grupo não autorizado.")
+        print("⏸ Ignorado — mensagem sem 'zumo'.\n")
         time.sleep(3)
         continue
 
-    print(f"📩 Mensagem detectada: {msg}")
+    # Regra 2️⃣ — Ignora grupos comuns (sem mestre)
+    if "@g.us" in numero and MASTER_PHONE not in numero:
+        print("⏸ Ignorado — mensagem de grupo comum.\n")
+        time.sleep(3)
+        continue
+
+    # Regra 3️⃣ — Sempre atender o mestre
+    print(f"✅ Comando 'zumo' detectado de {numero}. Processando...")
     resposta = gerar_resposta_ia(msg)
     enviar_resposta(numero, resposta)
-    time.sleep(3)
+    print("🟢 Ação concluída. Voltando à escuta...\n")
 
+    # Regra 4️⃣ e 5️⃣ — mantém o ciclo ativo
+    time.sleep(5)
