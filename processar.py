@@ -8,18 +8,26 @@ import requests
 # ======================================
 ZAPI_INSTANCE = os.getenv("ZAPI_INSTANCE")
 ZAPI_TOKEN = os.getenv("ZAPI_TOKEN")
-USUARIO_MESTRE = os.getenv("MASTER_PHONE")  # ex: 5581999999999
+USUARIO_MESTRE = os.getenv("MASTER_PHONE", "00000000000")  # Valor padrão se não existir
 
-if not ZAPI_INSTANCE or not ZAPI_TOKEN or not USUARIO_MESTRE:
-    print("❌ ERRO: variáveis de ambiente ausentes (ZAPI_INSTANCE, ZAPI_TOKEN, MASTER_PHONE)")
+URL_BASE = None
+if ZAPI_INSTANCE and ZAPI_TOKEN:
+    URL_BASE = f"https://api.z-api.io/instances/{ZAPI_INSTANCE}/token/{ZAPI_TOKEN}"
+else:
+    print("⚠️ AVISO: ZAPI_INSTANCE ou ZAPI_TOKEN ausentes.")
+    print(f"ZAPI_INSTANCE={ZAPI_INSTANCE}")
+    print(f"ZAPI_TOKEN={ZAPI_TOKEN}")
+    time.sleep(10)
     exit(1)
 
-URL_BASE = f"https://api.z-api.io/instances/{ZAPI_INSTANCE}/token/{ZAPI_TOKEN}"
+if not USUARIO_MESTRE or USUARIO_MESTRE == "00000000000":
+    print("⚠️ AVISO: MASTER_PHONE não definido. Operando em modo livre.")
+else:
+    print(f"📱 Mestre autorizado: {USUARIO_MESTRE}")
 
 # ======================================
 # FUNÇÕES
 # ======================================
-
 def verificar_mensagens():
     """Busca novas mensagens recebidas"""
     try:
