@@ -1,140 +1,121 @@
-import json, os, requests, time, threading
+# =========================================================
+# 🤖 CADIIA — Agente Inteligente 24/7
+# =========================================================
+# Regras Fundamentais:
+# 1️⃣ Nunca responder se a mensagem NÃO contiver a palavra “zumo”.
+# 2️⃣ Nunca responder em grupos (ignora mensagens com "group" ou tipo != chat individual).
+# 3️⃣ Atender qualquer solicitação do usuário se vier após “zumo”.
+# 4️⃣ Operação contínua 24/7 — reinicia automaticamente via workflow GitHub.
+# 5️⃣ Seguir instruções sem alterar ou questionar.
+# 6️⃣ Sempre responder de forma útil, direta e profissional, sem florear.
+# =========================================================
+
+import os, json, time, threading, requests
 from openai import OpenAI
 
-# ✅ Configura o cliente OpenRouter
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
-    base_url="https://openrouter.ai/api/v1"
-)
-
-# ✅ Variáveis de ambiente da Z-API e GitHub
-instance = os.getenv("ZAPI_INSTANCE")
-token = os.getenv("ZAPI_TOKEN")
+# Variáveis de ambiente
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+INSTANCE = os.getenv("ZAPI_INSTANCE")
+TOKEN = os.getenv("ZAPI_TOKEN")
 
 # =========================================================
-# 🔁 FUNÇÃO PRINCIPAL — Monitora e responde automaticamente
-# =========================================================
-def processar_mensagens():
-    ultimo_id = None
-    while True:
-        try:
-            url = f"https://api.z-api.io/instances/{instance}/token/{token}/chats/messages"
-            r = requests.get(url)
-            if r.status_code != 200:
-                print(f"⚠️ Erro ao buscar mensagens: {r.text}")
-                time.sleep(10)
-                continue
-
-            mensagens = r.json()
-
-            if not isinstance(mensagens, list):
-                print("⚠️ Nenhuma mensagem válida recebida.")
-                time.sleep(10)
-                continue
-
-            for msg in mensagens:
-                if not msg.get("message"):
-                    continue
-
-                msg_id = msg.get("id")
-                numero = msg.get("phone")
-                texto = msg.get("message", "").strip()
-
-                # Ignora mensagens repetidas
-                if msg_id == ultimo_id:
-                    continue
-
-                ultimo_id = msg_id
-
-                # 🔒 Ignora grupos
-                if "-" in numero:
-                    print(f"🚫 Ignorada (grupo): {numero}")
-                    continue
-
-                # 🔒 Só responde se começar com "zumo"
-                if not texto.lower().startswith("zumo"):
-                    print(f"⏸️ Ignorada (sem comando): {texto}")
-                    continue
-
-                print(f"📩 Nova mensagem válida de {numero}: {texto}")
-
-                # Remove o comando "zumo"
-                mensagem_limpa = texto[len("zumo"):].strip()
-
-                # 🤖 Gera resposta
-                try:
-                    resposta = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {"role": "system", "content": "Você é um atendente virtual simpático, profissional e direto."},
-                            {"role": "user", "content": mensagem_limpa}
-                        ]
-                    ).choices[0].message.content
-                except Exception as e:
-                    print(f"❌ Erro na API OpenRouter: {e}")
-                    continue
-
-                print(f"🤖 Resposta gerada: {resposta}")
-
-                # 📤 Envia a resposta no WhatsApp
-                payload = [{"phone": numero, "message": resposta}]
-                headers = {"Content-Type": "application/json"}
-                enviar = requests.post(
-                    f"https://api.z-api.io/instances/{instance}/token/{token}/send-messages",
-                    json=payload,
-                    headers=headers
-                )
-
-                if enviar.status_code == 200:
-                    print(f"✅ Mensagem enviada para {numero}")
-                else:
-                    print(f"❌ Falha ao enviar mensagem: {enviar.text}")
-
-        except Exception as e:
-            print(f"⚠️ Erro geral no loop: {e}")
-
-        time.sleep(10)  # 🔁 Executa novamente a cada 10 segundos
-
-
-# =========================================================
-# 🔁 BLOCO ADICIONADO — operação contínua 24/7
+# 🔁 Bloco de monitoramento — operação contínua 24/7
 # =========================================================
 
 def manter_logs():
+    """Mantém logs vivos para evitar timeout"""
     while True:
-        print("🟢 Agente ativo —", time.strftime("%H:%M:%S"))
-        time.sleep(300)
+        print("🟢 CADIIA ativo —", time.strftime("%H:%M:%S"))
+        time.sleep(300)  # log a cada 5 minutos
 
 threading.Thread(target=manter_logs, daemon=True).start()
 
-def manter_ativo():
-    repo = os.getenv("GITHUB_REPOSITORY", "NatureIA/AIAGENT")
-    token_gh = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
-    if not token_gh:
-        print("⚠️ Sem token do GitHub, não é possível reiniciar.")
+# =========================================================
+# 📥 Leitura da entrada
+# =========================================================
+try:
+    with open("entrada.json", "r", encoding="utf-8") as f:
+        dados = json.load(f)
+except Exception as e:
+    print("❌ Erro ao ler entrada.json:", e)
+    exit()
+
+numero = dados.get("numero", "")
+mensagem = dados.get("mensagem", "").strip()
+print(f"📨 Mensagem recebida de {numero}: {mensagem}")
+
+# =========================================================
+# 🚫 Regras de bloqueio
+# =========================================================
+if not mensagem or "zumo" not in mensagem.lower():
+    print("⏸ Ignorado — sem palavra-chave 'zumo'")
+    exit()
+
+if "group" in numero.lower():
+    print("🚫 Ignorado — mensagem de grupo detectada.")
+    exit()
+
+# =========================================================
+# 💬 Núcleo de Resposta IA
+# =========================================================
+prompt = f"""
+O usuário enviou a mensagem: "{mensagem}".
+Você é o agente CADIIA.
+Responda sempre de forma direta, precisa e útil.
+Nunca questione o comando do usuário.
+Nunca use linguagem floreada.
+Fale de forma profissional e concisa.
+"""
+
+try:
+    client = OpenAI(api_key=OPENAI_KEY)
+    resposta = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.6
+    ).choices[0].message.content.strip()
+except Exception as e:
+    resposta = f"⚠️ Erro de IA: {e}"
+
+print(f"💬 Resposta gerada: {resposta}")
+
+# =========================================================
+# 📤 Enviar resposta via Z-API
+# =========================================================
+try:
+    url = f"https://api.z-api.io/instances/{INSTANCE}/token/{TOKEN}/send-text"
+    r = requests.post(url, json={"phone": numero, "message": resposta})
+    if r.status_code == 200:
+        print("✅ Resposta enviada com sucesso.")
+    else:
+        print(f"⚠️ Erro ao enviar resposta: {r.status_code} - {r.text}")
+except Exception as e:
+    print(f"❌ Falha no envio: {e}")
+
+# =========================================================
+# 🔁 Reinício automático do ciclo
+# =========================================================
+def reiniciar_workflow():
+    repo = os.getenv("GITHUB_REPOSITORY", "CADIIA/AIAGENT")
+    token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
+    if not token:
+        print("⚠️ Sem token do GitHub, reinício automático desativado.")
         return
     url = f"https://api.github.com/repos/{repo}/actions/workflows/whatsapp.yml/dispatches"
     headers = {
-        "Authorization": f"Bearer {token_gh}",
+        "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json"
     }
     payload = {"ref": "main"}
     try:
-        print("⏳ Preparando novo ciclo de execução...")
+        print("♻️ Iniciando novo ciclo automático...")
         r = requests.post(url, headers=headers, json=payload)
         if r.status_code == 204:
-            print("✅ Novo ciclo iniciado com sucesso (agente contínuo).")
+            print("✅ Novo ciclo acionado com sucesso.")
         else:
-            print(f"⚠️ Falha ao reiniciar: {r.status_code} - {r.text}")
+            print(f"⚠️ Falha no reinício: {r.status_code} - {r.text}")
     except Exception as e:
-        print(f"Erro ao reiniciar ciclo: {e}")
+        print(f"❌ Erro ao reiniciar ciclo: {e}")
 
-# =========================================================
-# 🚀 EXECUÇÃO
-# =========================================================
-print("🚀 Iniciando agente autônomo WhatsApp GPT (GitHub + Z-API)")
-processar_mensagens()
-
-# Chama reinício automático ao encerrar
-manter_ativo()
-print("🏁 Execução finalizada — ciclo contínuo garantido.")
+reiniciar_workflow()
+print("🏁 Execução concluída — operação contínua garantida.")
