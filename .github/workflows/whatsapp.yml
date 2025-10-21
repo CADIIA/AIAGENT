@@ -2,11 +2,6 @@ name: Agente WhatsApp GPT
 
 on:
   workflow_dispatch:
-  repository_dispatch:
-    types: [mensagem_recebida]
-  push:
-    paths:
-      - 'entrada.json'
 
 jobs:
   responder:
@@ -15,36 +10,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Instalar dependências Python
-        run: pip install openai requests
-
-      - name: Instalar dependências Node
-        run: npm install node-fetch@3
+      - name: Instalar dependências
+        run: |
+          pip install openai requests
+          npm install node-fetch@3
 
       - name: Criar entrada.json
-        run: |
-          echo '${{ toJson(github.event.client_payload) }}' > entrada.json
+        run: echo 'null' > entrada.json
 
-      - name: Executar relay de mensagens
+      - name: Executar relay contínuo
         env:
           ZAPI_INSTANCE: ${{ secrets.ZAPI_INSTANCE }}
           ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: node relay.js
-
-      - name: Rodar agente
-        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ZAPI_INSTANCE: ${{ secrets.ZAPI_INSTANCE }}
-          ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: python processar.py
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node relay.js & sleep 10 && python processar.py
 
       - name: Auto-reiniciar workflow
         if: always()
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "⏳ Reiniciando próximo ciclo..."
           curl -X POST \
