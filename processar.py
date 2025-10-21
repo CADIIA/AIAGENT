@@ -1,69 +1,51 @@
 import os
 import time
-import json
 import requests
+from openai import OpenAI
 
-import os
+# ==============================
+# CONFIGURAÇÕES INICIAIS
+# ==============================
 print("🔍 DEBUG — Variáveis de ambiente recebidas:")
 for k in ["ZAPI_INSTANCE", "ZAPI_TOKEN", "MASTER_PHONE", "OPENAI_API_KEY", "GH_TOKEN"]:
     print(f"   {k}: {os.getenv(k)}")
 
-print("✅ Ambiente pronto, iniciando CADIIA...")
-
-import sys
-sys.stdout.flush()
-
-
-
-
-# ======================================
-# CONFIGURAÇÕES AUTOMÁTICAS
-# ======================================
 ZAPI_INSTANCE = os.getenv("ZAPI_INSTANCE")
 ZAPI_TOKEN = os.getenv("ZAPI_TOKEN")
-USUARIO_MESTRE = os.getenv("MASTER_PHONE", "00000000000")  # Valor padrão se não existir
+MASTER_PHONE = os.getenv("MASTER_PHONE", "00000000000")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-URL_BASE = None
-if ZAPI_INSTANCE and ZAPI_TOKEN:
-    URL_BASE = f"https://api.z-api.io/instances/{ZAPI_INSTANCE}/token/{ZAPI_TOKEN}"
-else:
-    print("⚠️ AVISO: ZAPI_INSTANCE ou ZAPI_TOKEN ausentes.")
-    print(f"ZAPI_INSTANCE={ZAPI_INSTANCE}")
-    print(f"ZAPI_TOKEN={ZAPI_TOKEN}")
-    time.sleep(10)
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+if not ZAPI_INSTANCE or not ZAPI_TOKEN:
+    print("❌ ERRO: Variáveis da Z-API ausentes.")
     exit(1)
 
-if not USUARIO_MESTRE or USUARIO_MESTRE == "00000000000":
-    print("⚠️ AVISO: MASTER_PHONE não definido. Operando em modo livre.")
-else:
-    print(f"📱 Mestre autorizado: {USUARIO_MESTRE}")
+URL_BASE = f"https://api.z-api.io/instances/{ZAPI_INSTANCE}/token/{ZAPI_TOKEN}"
+print("✅ Ambiente pronto, iniciando CADIIA IA...")
 
-# ======================================
+# ==============================
 # FUNÇÕES
-# ======================================
+# ==============================
 def verificar_mensagens():
-    """Busca novas mensagens recebidas com robustez"""
+    """Busca novas mensagens (usando endpoint atualizado da Z-API)."""
     try:
         r = requests.get(f"{URL_BASE}/chats/messages", timeout=15)
+        print("📡 Resposta da ZAPI:", r.status_code)
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, list) and len(data) > 0:
-                for msg in reversed(data[-5:]):  # analisa últimas 5 mensagens
-                    texto = msg.get("body") or msg.get("message") or ""
-                    if not texto:
-                        continue
-                    texto = texto.strip().lower()
-                    if "zumo" in texto:
-                        numero = msg.get("chatId", "")
-                        print(f"📨 Mensagem detectada: {texto} | de: {numero}")
-                        return {"numero": numero, "mensagem": texto}
+                ultima = data[-1]
+                numero = ultima.get("chatId", "")
+                msg = ultima.get("body", "").strip()
+                return {"numero": numero, "mensagem": msg}
     except Exception as e:
         print(f"⚠️ Erro ao verificar mensagens: {e}")
     return None
 
 
 def enviar_resposta(numero, texto):
-    """Envia resposta de texto"""
+    """Envia resposta de texto via Z-API."""
     try:
         payload = {
             "phone": numero.replace("@c.us", "").replace("@g.us", ""),
@@ -75,14 +57,27 @@ def enviar_resposta(numero, texto):
         print(f"❌ Erro ao enviar mensagem: {e}")
 
 
-def limpar():
-    """Apenas log para manter ciclo ativo"""
-    print("♻️ Nenhuma nova mensagem... aguardando...")
+def gerar_resposta_ia(mensagem):
+    """Usa GPT (OpenAI) para interpretar e responder à mensagem."""
+    try:
+        resposta = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Você é o agente CADIIA, um assistente inteligente conectado ao WhatsApp. Responda de forma útil, natural e precisa."},
+                {"role": "user", "content": mensagem}
+            ],
+            temperature=0.7,
+            max_tokens=300
+        )
+        return resposta.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"⚠️ Erro ao gerar resposta IA: {e}")
+        return "⚠️ Falha ao gerar resposta inteligente."
 
 
-# ======================================
-# LOOP PRINCIPAL (NUNCA PARA)
-# ======================================
+# ==============================
+# LOOP PRINCIPAL
+# ==============================
 print("🟢 CADIIA ativo — ciclo contínuo iniciado...")
 
 while True:
@@ -93,27 +88,20 @@ while True:
         continue
 
     numero = entrada["numero"]
-    msg = entrada["mensagem"].lower().strip()
+    msg = entrada["mensagem"].strip()
 
-    # --- 1️⃣ Só reage se contiver 'zumo'
-    if "zumo" not in msg:
-        limpar()
+    # Ignora mensagens sem "zumo"
+    if "zumo" not in msg.lower():
+        time.sleep(2)
+        continue
+
+    # Bloqueia grupos que não sejam do mestre (se configurado)
+    if "@g.us" in numero and (MASTER_PHONE not in numero):
+        print("⏸ Ignorado — grupo não autorizado.")
         time.sleep(3)
         continue
 
-    # --- 2️⃣ Ignora grupos, exceto se for o dono
-    if "@g.us" in numero and USUARIO_MESTRE not in numero:
-        print("⏸ Ignorado — grupo comum")
-        limpar()
-        time.sleep(3)
-        continue
-
-    # --- 3️⃣ Atende o mestre em qualquer contexto
-    print(f"📩 Mensagem reconhecida de {numero}: {msg}")
-    enviar_resposta(numero, f"🤖 Zumo recebido: {msg}")
-    limpar()
+    print(f"📩 Mensagem detectada: {msg}")
+    resposta = gerar_resposta_ia(msg)
+    enviar_resposta(numero, resposta)
     time.sleep(3)
-
-
-
-
