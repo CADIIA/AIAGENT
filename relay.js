@@ -1,4 +1,4 @@
-// relay.js — coleta mensagens da Z-API e aciona processar.py via GitHub Actions
+// relay.js — CADIIA WhatsApp Agent (versão final)
 import fetch from "node-fetch";
 import fs from "fs";
 
@@ -12,25 +12,34 @@ if (!INSTANCE || !TOKEN || !GH_TOKEN || !REPO) {
   process.exit(1);
 }
 
-console.log("🟢 Relay ativo — monitorando mensagens Z-API a cada 10s...");
+console.log("🟢 Relay ativo — monitorando mensagens Z-API a cada 10 s...");
+
+// cria um arquivo de debug para evitar erro “no such file”
+try {
+  fs.writeFileSync("entrada.json", JSON.stringify({ numero: "debug", mensagem: "inicial" }));
+} catch (e) {
+  console.error("⚠️ Falha ao criar entrada.json inicial:", e.message);
+}
 
 async function verificarMensagens() {
   try {
-    const url = `https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/messages`;
+    // endpoint correto da Z-API para listar conversas
+    const url = `https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/chats`;
     const res = await fetch(url);
-    const msgs = await res.json();
+    const data = await res.json();
 
-    if (!Array.isArray(msgs)) return;
+    if (!data || !Array.isArray(data.chats)) return;
 
-    for (const msg of msgs) {
-      if (!msg || !msg.phone || !msg.message) continue;
-      if (msg.fromMe || msg.isGroupMsg) continue;
+    for (const chat of data.chats) {
+      if (!chat || !chat.phone || !chat.lastMessage) continue;
+      const numero = chat.phone;
+      const mensagem = chat.lastMessage.text?.trim() || "";
 
-      const numero = msg.phone;
-      const mensagem = msg.message.trim();
+      if (!mensagem || chat.lastMessage.fromMe) continue;
 
       console.log(`📩 ${numero}: ${mensagem}`);
 
+      // reage apenas quando contiver “zumo”
       if (!mensagem.toLowerCase().includes("zumo")) continue;
 
       fs.writeFileSync("entrada.json", JSON.stringify({ numero, mensagem }));
@@ -50,8 +59,13 @@ async function verificarMensagens() {
         body: JSON.stringify(payload),
       });
 
-      if (gh.status === 204) console.log("🚀 Workflow disparado com sucesso!");
-      else console.error(`⚠️ Erro ao disparar workflow: ${gh.status}`);
+      if (gh.status === 204) {
+        console.log("🚀 Workflow disparado com sucesso!");
+      } else {
+        console.error(`⚠️ Erro ao disparar workflow: ${gh.status}`);
+        const erroTxt = await gh.text();
+        console.error(erroTxt);
+      }
     }
   } catch (err) {
     console.error("⚠️ Erro ao consultar Z-API:", err.message);
