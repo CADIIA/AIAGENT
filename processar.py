@@ -3,6 +3,10 @@ import time
 import json
 import requests
 
+import os
+print("✅ Variáveis carregadas:", {k: os.getenv(k) for k in ["ZAPI_INSTANCE", "ZAPI_TOKEN", "MASTER_PHONE", "OPENAI_API_KEY"]})
+
+
 # ======================================
 # CONFIGURAÇÕES AUTOMÁTICAS
 # ======================================
@@ -95,3 +99,4 @@ while True:
     enviar_resposta(numero, f"🤖 Zumo recebido: {msg}")
     limpar()
     time.sleep(3)
+
