@@ -1,4 +1,4 @@
-// relay.js — CADIIA WhatsApp Agent (versão final)
+// relay.js — CADIIA WhatsApp Agent (versão contínua e autônoma)
 import fetch from "node-fetch";
 import fs from "fs";
 
@@ -12,23 +12,33 @@ if (!INSTANCE || !TOKEN || !GH_TOKEN || !REPO) {
   process.exit(1);
 }
 
-console.log("🟢 Relay ativo — monitorando mensagens Z-API a cada 10 s...");
+console.log("🟢 Relay CADIIA ativo — ciclo contínuo iniciado...");
 
-// cria um arquivo de debug para evitar erro “no such file”
+// cria o arquivo de entrada inicial, para evitar erro “no such file”
 try {
-  fs.writeFileSync("entrada.json", JSON.stringify({ numero: "debug", mensagem: "inicial" }));
+  if (!fs.existsSync("entrada.json")) {
+    fs.writeFileSync("entrada.json", JSON.stringify({ numero: "debug", mensagem: "inicial" }));
+  }
 } catch (e) {
   console.error("⚠️ Falha ao criar entrada.json inicial:", e.message);
 }
 
+// Função principal
 async function verificarMensagens() {
   try {
-    // endpoint correto da Z-API para listar conversas
     const url = `https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/chats`;
     const res = await fetch(url);
     const data = await res.json();
 
-    if (!data || !Array.isArray(data.chats)) return;
+    if (data.error) {
+      console.error("⚠️ Erro da Z-API:", data.error);
+      return;
+    }
+
+    if (!data || !Array.isArray(data.chats)) {
+      console.log("ℹ️ Nenhuma conversa encontrada.");
+      return;
+    }
 
     for (const chat of data.chats) {
       if (!chat || !chat.phone || !chat.lastMessage) continue;
@@ -39,11 +49,12 @@ async function verificarMensagens() {
 
       console.log(`📩 ${numero}: ${mensagem}`);
 
-      // reage apenas quando contiver “zumo”
+      // reage apenas se contiver “zumo”
       if (!mensagem.toLowerCase().includes("zumo")) continue;
 
       fs.writeFileSync("entrada.json", JSON.stringify({ numero, mensagem }));
 
+      // dispara workflow GitHub
       const dispatchUrl = `https://api.github.com/repos/${REPO}/dispatches`;
       const payload = {
         event_type: "mensagem_recebida",
@@ -62,15 +73,21 @@ async function verificarMensagens() {
       if (gh.status === 204) {
         console.log("🚀 Workflow disparado com sucesso!");
       } else {
-        console.error(`⚠️ Erro ao disparar workflow: ${gh.status}`);
-        const erroTxt = await gh.text();
-        console.error(erroTxt);
+        const erro = await gh.text();
+        console.error(`⚠️ Erro ao disparar workflow: ${gh.status} - ${erro}`);
       }
     }
   } catch (err) {
-    console.error("⚠️ Erro ao consultar Z-API:", err.message);
+    console.error("⚠️ Erro geral ao consultar Z-API:", err.message);
   }
 }
 
-setInterval(verificarMensagens, 10000);
-verificarMensagens();
+// loop infinito com atraso controlado
+async function iniciarCiclo() {
+  while (true) {
+    await verificarMensagens();
+    await new Promise((r) => setTimeout(r, 10000)); // espera 10s antes de verificar de novo
+  }
+}
+
+iniciarCiclo();
