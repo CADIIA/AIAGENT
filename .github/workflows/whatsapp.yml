@@ -1,38 +1,45 @@
-name: Agente WhatsApp GPT
+name: CADIIA WhatsApp Agent
 
 on:
   workflow_dispatch:
+  repository_dispatch:
+    types: [mensagem_recebida]
 
 jobs:
-  responder:
+  agente:
     runs-on: ubuntu-latest
-    timeout-minutes: 355  # 5h55 — antes do limite de 6h
+    timeout-minutes: 355  # ~6h máximo permitido
     steps:
       - uses: actions/checkout@v4
 
       - name: Instalar dependências
         run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip
           pip install openai requests
-          npm install node-fetch@3
+          npm install node-fetch
 
-      - name: Criar entrada.json
-        run: echo 'null' > entrada.json
-
-      - name: Executar relay contínuo
+      - name: Iniciar Relay
         env:
           ZAPI_INSTANCE: ${{ secrets.ZAPI_INSTANCE }}
           ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: node relay.js & sleep 10 && python processar.py
+        run: node relay.js &
 
-      - name: Auto-reiniciar workflow
+      - name: Processar mensagens
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ZAPI_INSTANCE: ${{ secrets.ZAPI_INSTANCE }}
+          ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
+        run: python3 processar.py
+
+      - name: Reiniciar automaticamente
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "⏳ Reiniciando próximo ciclo..."
+          echo "♻️ Reiniciando ciclo..."
           curl -X POST \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
