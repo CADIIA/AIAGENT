@@ -16,7 +16,8 @@ console.log("🟢 Relay ativo — monitorando mensagens Z-API a cada 10s...");
 
 async function verificarMensagens() {
   try {
-    const url = `https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/messages`;
+    // ✅ endpoint atualizado (era /messages → agora é /receive-messages)
+    const url = `https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/receive-messages`;
     const res = await fetch(url);
     const msgs = await res.json();
 
@@ -31,10 +32,10 @@ async function verificarMensagens() {
 
       console.log(`📩 ${numero}: ${mensagem}`);
 
-      // Salva mensagem no arquivo local
+      // Salva mensagem localmente
       fs.writeFileSync("entrada.json", JSON.stringify({ numero, mensagem }));
 
-      // Envia resposta (opcional: pode ajustar o texto aqui)
+      // Envia resposta automática
       await fetch(`https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/send-text`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
