@@ -1,5 +1,9 @@
 name: CADIIA WhatsApp Agent
 
+permissions:
+  contents: write
+  actions: write
+
 on:
   workflow_dispatch:
   repository_dispatch:
@@ -9,6 +13,7 @@ jobs:
   agente:
     runs-on: ubuntu-latest
     timeout-minutes: 355  # ~6h máximo permitido
+
     steps:
       - uses: actions/checkout@v4
 
@@ -23,7 +28,8 @@ jobs:
         env:
           ZAPI_INSTANCE: ${{ secrets.ZAPI_INSTANCE }}
           ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # ⚠️ usar GH_TOKEN personalizado, NÃO o automático do GitHub
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: node relay.js &
 
@@ -37,7 +43,7 @@ jobs:
       - name: Reiniciar automaticamente
         if: always()
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           echo "♻️ Reiniciando ciclo..."
           curl -X POST \
