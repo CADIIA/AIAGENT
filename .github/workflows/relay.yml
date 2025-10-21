@@ -1,21 +1,23 @@
-name: Relay Z-API
+name: Relay Z-API 24/7
 
 on:
   workflow_dispatch:
 
 jobs:
-  start:
+  relay:
     runs-on: ubuntu-latest
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-
+          node-version: "20"
       - name: Instalar dependências
-        run: npm install express node-fetch
-
-      - name: Iniciar relay
+        run: npm install node-fetch@2
+      - name: Iniciar relay.js
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ZAPI_INSTANCE: ${{ secrets.ZAPI_INSTANCE }}
+          ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: node relay.js
