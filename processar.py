@@ -4,7 +4,16 @@ import json
 import requests
 
 import os
-print("✅ Variáveis carregadas:", {k: os.getenv(k) for k in ["ZAPI_INSTANCE", "ZAPI_TOKEN", "MASTER_PHONE", "OPENAI_API_KEY"]})
+print("🔍 DEBUG — Variáveis de ambiente recebidas:")
+for k in ["ZAPI_INSTANCE", "ZAPI_TOKEN", "MASTER_PHONE", "OPENAI_API_KEY", "GH_TOKEN"]:
+    print(f"   {k}: {os.getenv(k)}")
+
+print("✅ Ambiente pronto, iniciando CADIIA...")
+
+import sys
+sys.stdout.flush()
+
+
 
 
 # ======================================
@@ -99,4 +108,5 @@ while True:
     enviar_resposta(numero, f"🤖 Zumo recebido: {msg}")
     limpar()
     time.sleep(3)
+
 
