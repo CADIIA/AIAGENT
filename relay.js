@@ -1,8 +1,7 @@
 // ===============================
-// 🔁 relay.js — Agente Z-API + GitHub 24/7
+// 🔁 relay.js — Z-API + GitHub Dispatch automático
 // ===============================
 
-import fs from "fs";
 import fetch from "node-fetch";
 
 const INSTANCE = process.env.ZAPI_INSTANCE;
@@ -15,57 +14,52 @@ if (!INSTANCE || !TOKEN || !GH_TOKEN || !REPO) {
   process.exit(1);
 }
 
-console.log("🟢 Relay iniciado — monitorando mensagens a cada 10s...");
+console.log("🟢 Relay iniciado — verificando mensagens a cada 10s...");
 
 async function verificarMensagens() {
   try {
     const url = `https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/messages`;
     const r = await fetch(url);
-    const data = await r.json();
+    const mensagens = await r.json();
 
-    if (!data || !Array.isArray(data)) return;
+    if (!Array.isArray(mensagens)) return;
 
-    for (const msg of data) {
+    for (const msg of mensagens) {
       if (!msg || !msg.phone || !msg.message) continue;
-      if (msg.fromMe) continue; // Ignora mensagens enviadas pelo próprio bot
+      if (msg.fromMe) continue; // Ignora mensagens enviadas pelo bot
 
       const numero = msg.phone;
       const mensagem = msg.message.trim();
 
-      // Salva no entrada.json
-      fs.writeFileSync(
-        "entrada.json",
-        JSON.stringify({ numero, mensagem }, null, 2),
-        "utf8"
-      );
-
       console.log(`📩 Nova mensagem: ${numero} => ${mensagem}`);
 
-      // Commit no GitHub para disparar o workflow
-      await fetch(
-        `https://api.github.com/repos/${REPO}/contents/entrada.json`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${GH_TOKEN}`,
-            Accept: "application/vnd.github+json",
-          },
-          body: JSON.stringify({
-            message: `Atualização automática - ${new Date().toISOString()}`,
-            content: Buffer.from(
-              JSON.stringify({ numero, mensagem }, null, 2)
-            ).toString("base64"),
-          }),
-        }
-      );
+      // Dispara evento repository_dispatch no GitHub
+      const dispatchUrl = `https://api.github.com/repos/${REPO}/dispatches`;
+      const payload = {
+        event_type: "mensagem_recebida",
+        client_payload: { numero, mensagem },
+      };
 
-      console.log("🚀 Workflow disparado com sucesso.");
+      const response = await fetch(dispatchUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${GH_TOKEN}`,
+          Accept: "application/vnd.github+json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.status === 204) {
+        console.log("🚀 Workflow disparado com sucesso!");
+      } else {
+        const txt = await response.text();
+        console.error(`⚠️ Erro ao disparar workflow: ${response.status} - ${txt}`);
+      }
     }
   } catch (e) {
     console.error("⚠️ Erro ao verificar mensagens:", e.message);
   }
 }
 
-// Loop a cada 10 segundos
 setInterval(verificarMensagens, 10000);
 verificarMensagens();
