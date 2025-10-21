@@ -1,78 +1,105 @@
-import json, os, requests
+import json, os, requests, time, threading
 from openai import OpenAI
 
-# ✅ Ajustado para usar o OpenRouter corretamente
+# ✅ Configura o cliente OpenRouter
 client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
     base_url="https://openrouter.ai/api/v1"
 )
 
-# 🔄 Ajuste: compatibilidade com repository_dispatch (GitHub)
-# Se o arquivo 'entrada.json' contiver client_payload, extrai corretamente
-with open("entrada.json", "r", encoding="utf-8") as f:
-    dados = json.load(f)
-
-if "client_payload" in dados:
-    dados = dados["client_payload"]
-
-numero = dados.get("numero", "").strip()
-mensagem = dados.get("mensagem", "").strip()
-
-# 🔒 1️⃣ Ignora mensagens vindas de grupos
-if "-" in numero:
-    print(f"🚫 Mensagem ignorada (vinda de grupo): {numero}")
-    exit(0)
-
-# 🔒 2️⃣ Ignora mensagens sem o comando "Zumo"
-if not mensagem.lower().startswith("zumo"):
-    print(f"⏸️ Mensagem ignorada (sem comando 'Zumo'): {mensagem}")
-    exit(0)
-
-print(f"📩 Mensagem válida recebida de {numero}: {mensagem}")
-
-# Remove o comando "Zumo" antes de enviar pro GPT
-mensagem_limpa = mensagem[len("zumo"):].strip()
-
-# 🤖 Chama o GPT
-resposta = client.chat.completions.create(
-    model="gpt-4o-mini",
-    messages=[
-        {"role": "system", "content": "Você é um atendente virtual simpático, profissional e direto."},
-        {"role": "user", "content": mensagem_limpa}
-    ]
-).choices[0].message.content
-
-print(f"🤖 Resposta gerada: {resposta}")
-
-# 💾 Salva a resposta
-with open("saida.json", "w", encoding="utf-8") as f:
-    json.dump({"numero": numero, "resposta": resposta}, f, indent=2, ensure_ascii=False)
-
-# 📤 Envia pro WhatsApp via Z-API
+# ✅ Variáveis de ambiente da Z-API e GitHub
 instance = os.getenv("ZAPI_INSTANCE")
 token = os.getenv("ZAPI_TOKEN")
 
-url = f"https://api.z-api.io/instances/{instance}/token/{token}/send-messages"
+# =========================================================
+# 🔁 FUNÇÃO PRINCIPAL — Monitora e responde automaticamente
+# =========================================================
+def processar_mensagens():
+    ultimo_id = None
+    while True:
+        try:
+            url = f"https://api.z-api.io/instances/{instance}/token/{token}/chats/messages"
+            r = requests.get(url)
+            if r.status_code != 200:
+                print(f"⚠️ Erro ao buscar mensagens: {r.text}")
+                time.sleep(10)
+                continue
 
-payload = [{"phone": numero, "message": resposta}]
-headers = {"Content-Type": "application/json"}
+            mensagens = r.json()
 
-r = requests.post(url, json=payload, headers=headers)
+            if not isinstance(mensagens, list):
+                print("⚠️ Nenhuma mensagem válida recebida.")
+                time.sleep(10)
+                continue
 
-if r.status_code == 200:
-    print("✅ Mensagem enviada com sucesso!")
-else:
-    print(f"❌ Erro ao enviar mensagem: {r.text}")
+            for msg in mensagens:
+                if not msg.get("message"):
+                    continue
 
+                msg_id = msg.get("id")
+                numero = msg.get("phone")
+                texto = msg.get("message", "").strip()
+
+                # Ignora mensagens repetidas
+                if msg_id == ultimo_id:
+                    continue
+
+                ultimo_id = msg_id
+
+                # 🔒 Ignora grupos
+                if "-" in numero:
+                    print(f"🚫 Ignorada (grupo): {numero}")
+                    continue
+
+                # 🔒 Só responde se começar com "zumo"
+                if not texto.lower().startswith("zumo"):
+                    print(f"⏸️ Ignorada (sem comando): {texto}")
+                    continue
+
+                print(f"📩 Nova mensagem válida de {numero}: {texto}")
+
+                # Remove o comando "zumo"
+                mensagem_limpa = texto[len("zumo"):].strip()
+
+                # 🤖 Gera resposta
+                try:
+                    resposta = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": "Você é um atendente virtual simpático, profissional e direto."},
+                            {"role": "user", "content": mensagem_limpa}
+                        ]
+                    ).choices[0].message.content
+                except Exception as e:
+                    print(f"❌ Erro na API OpenRouter: {e}")
+                    continue
+
+                print(f"🤖 Resposta gerada: {resposta}")
+
+                # 📤 Envia a resposta no WhatsApp
+                payload = [{"phone": numero, "message": resposta}]
+                headers = {"Content-Type": "application/json"}
+                enviar = requests.post(
+                    f"https://api.z-api.io/instances/{instance}/token/{token}/send-messages",
+                    json=payload,
+                    headers=headers
+                )
+
+                if enviar.status_code == 200:
+                    print(f"✅ Mensagem enviada para {numero}")
+                else:
+                    print(f"❌ Falha ao enviar mensagem: {enviar.text}")
+
+        except Exception as e:
+            print(f"⚠️ Erro geral no loop: {e}")
+
+        time.sleep(10)  # 🔁 Executa novamente a cada 10 segundos
 
 
 # =========================================================
 # 🔁 BLOCO ADICIONADO — operação contínua 24/7
 # =========================================================
 
-import time, threading
-
-# Mantém logs ativos a cada 5 minutos
 def manter_logs():
     while True:
         print("🟢 Agente ativo —", time.strftime("%H:%M:%S"))
@@ -80,16 +107,15 @@ def manter_logs():
 
 threading.Thread(target=manter_logs, daemon=True).start()
 
-# Reinicia o workflow automaticamente antes de encerrar
 def manter_ativo():
     repo = os.getenv("GITHUB_REPOSITORY", "NatureIA/AIAGENT")
-    token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
-    if not token:
+    token_gh = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
+    if not token_gh:
         print("⚠️ Sem token do GitHub, não é possível reiniciar.")
         return
     url = f"https://api.github.com/repos/{repo}/actions/workflows/whatsapp.yml/dispatches"
     headers = {
-        "Authorization": f"Bearer {token}",
+        "Authorization": f"Bearer {token_gh}",
         "Accept": "application/vnd.github+json"
     }
     payload = {"ref": "main"}
@@ -103,7 +129,12 @@ def manter_ativo():
     except Exception as e:
         print(f"Erro ao reiniciar ciclo: {e}")
 
-# Chama reinício automático
-manter_ativo()
+# =========================================================
+# 🚀 EXECUÇÃO
+# =========================================================
+print("🚀 Iniciando agente autônomo WhatsApp GPT (GitHub + Z-API)")
+processar_mensagens()
 
+# Chama reinício automático ao encerrar
+manter_ativo()
 print("🏁 Execução finalizada — ciclo contínuo garantido.")
