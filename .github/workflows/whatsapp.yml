@@ -1,31 +1,40 @@
-name: CADIIA Relay
+# .github/workflows/whatsapp.yml
+name: CADIIA WhatsApp Agent
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/10 * * * *"  # reinicia a cada 10 minutos
+    - cron: "*/5 * * * *" # reinicia a cada 5min para garantir continuidade
+
+concurrency:
+  group: cadiia-whatsapp
+  cancel-in-progress: false
 
 jobs:
   agente:
     runs-on: ubuntu-latest
-    timeout-minutes: 9
+    timeout-minutes: 360
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Python
-        run: |
-          sudo apt-get update -y
-          python3 --version
-          pip3 install --upgrade pip openai requests
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      - name: Iniciar CADIIA
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-cache-dir requests openai
+
+      - name: Run CADIIA
         env:
           ZAPI_INSTANCE: ${{ secrets.ZAPI_INSTANCE }}
           ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           MASTER_PHONE: ${{ secrets.MASTER_PHONE }}
         run: |
-          echo "🤖 CADIIA iniciando..."
-          python3 processar.py
+          echo "🤖 CADIIA START"
+          python -u processar.py
