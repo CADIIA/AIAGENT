@@ -1,206 +1,126 @@
-# processar.py
-# Regras implementadas:
-# - responde somente se a mensagem contiver "zumo"
-# - não responde em grupos (exceto se o MASTER_PHONE estiver presente no chatId)
-# - atende qualquer solicitação do MASTER em qualquer chat (privado ou grupo)
-# - roda em loop 24/7, autocorretivo, tolerante a falhas de rede/API
+import os, time, json, requests
+from openai import OpenAI
 
-import os
-import time
-import json
-import traceback
-from typing import List, Dict, Any
-import requests
-
-# ---- Config ----
 ZAPI_INSTANCE = os.getenv("ZAPI_INSTANCE")
-ZAPI_TOKEN = os.getenv("ZAPI_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-MASTER_PHONE = os.getenv("MASTER_PHONE", "")  # ex: 5581999999999
+ZAPI_TOKEN    = os.getenv("ZAPI_TOKEN")
+OPENAI_API_KEY= os.getenv("OPENAI_API_KEY")
+MASTER_PHONE  = os.getenv("MASTER_PHONE", "00000000000")
 
-CHECK_INTERVAL = 5  # segundos entre polls
-SEEN_FILE = "cadiia_seen.json"
-MAX_RETRIES = 3
-BACKOFF_BASE = 1.5
-
-# ---- Validações iniciais ----
-missing = [k for k,v in (("ZAPI_INSTANCE",ZAPI_INSTANCE),("ZAPI_TOKEN",ZAPI_TOKEN),("OPENAI_API_KEY",OPENAI_API_KEY)) if not v]
-if missing:
-    print("❌ ENV faltando:", missing)
-    raise SystemExit(1)
+if not (ZAPI_INSTANCE and ZAPI_TOKEN and OPENAI_API_KEY):
+    print("❌ Ambiente inválido. Verifique ZAPI_INSTANCE, ZAPI_TOKEN, OPENAI_API_KEY.")
+    while True: time.sleep(3600)
 
 ZAPI_URL = f"https://api.z-api.io/instances/{ZAPI_INSTANCE}/token/{ZAPI_TOKEN}"
-OPENAI_API = OPENAI_API_KEY  # apenas nome sem lib para evitar import issues
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-print("✅ CADIIA carregado")
-print("📡 Z-API:", ZAPI_INSTANCE)
-print("👑 MASTER_PHONE:", MASTER_PHONE or "(não definido)")
+print("✅ CADIIA inicializado")
+print(f"📡 Z-API: {ZAPI_INSTANCE} | 👑 Mestre: {MASTER_PHONE}")
 
-# ---- Persistência de vistos ----
-def load_seen() -> set:
-    try:
-        with open(SEEN_FILE, "r") as f:
-            return set(json.load(f))
-    except Exception:
-        return set()
+HEADERS = {"Content-Type": "application/json"}
+last_id = None  # evita respostas repetidas
 
-def save_seen(s: set):
-    try:
-        with open(SEEN_FILE, "w") as f:
-            json.dump(list(s), f)
-    except Exception as e:
-        print("⚠️ Falha ao salvar vistos:", e)
-
-seen = load_seen()
-
-# ---- Helpers Z-API ----
-def zapi_get(path: str, timeout=15) -> Any:
-    url = f"{ZAPI_URL}{path}"
-    for attempt in range(1, MAX_RETRIES+1):
+def zget(path, timeout=15):
+    for wait in (0, 2, 5, 10):
+        if wait: time.sleep(wait)
         try:
-            r = requests.get(url, timeout=timeout)
-            return r
+            r = requests.get(f"{ZAPI_URL}{path}", timeout=timeout)
+            if r.status_code == 429:
+                # rate limit – aguarda e tenta de novo
+                retry = int(r.headers.get("Retry-After", "5"))
+                time.sleep(retry)
+                continue
+            if r.ok: return r.json()
+            print(f"⚠️ ZGET {path} -> {r.status_code} {r.text[:180]}")
         except Exception as e:
-            wait = BACKOFF_BASE ** attempt
-            print(f"⚠️ GET erro (attempt {attempt}): {e} -> backoff {wait}s")
-            time.sleep(wait)
+            print(f"⚠️ ZGET {path} erro: {e}")
     return None
 
-def zapi_post(path: str, payload: Dict, timeout=15) -> Any:
-    url = f"{ZAPI_URL}{path}"
-    for attempt in range(1, MAX_RETRIES+1):
+def zpost(path, payload, timeout=15):
+    for wait in (0, 2, 5, 10):
+        if wait: time.sleep(wait)
         try:
-            r = requests.post(url, json=payload, timeout=timeout)
-            return r
+            r = requests.post(f"{ZAPI_URL}{path}", headers=HEADERS, json=payload, timeout=timeout)
+            if r.status_code == 429:
+                retry = int(r.headers.get("Retry-After", "5"))
+                time.sleep(retry)
+                continue
+            if r.ok: return True
+            print(f"⚠️ ZPOST {path} -> {r.status_code} {r.text[:180]}")
         except Exception as e:
-            wait = BACKOFF_BASE ** attempt
-            print(f"⚠️ POST erro (attempt {attempt}): {e} -> backoff {wait}s")
-            time.sleep(wait)
-    return None
+            print(f"⚠️ ZPOST {path} erro: {e}")
+    return False
 
-# ---- Send / Fetch ----
-def fetch_messages() -> List[Dict]:
-    r = zapi_get("/last-received-messages")
-    if not r:
-        return []
+def enviar(numero, texto):
+    phone = numero.replace("@c.us","").replace("@g.us","")
+    ok = zpost("/send-text", {"phone": phone, "message": texto})
+    print(f"📤 Envio para {phone}: {'OK' if ok else 'FALHOU'}")
+
+def pedir_ia(prompt):
     try:
-        if r.status_code != 200:
-            print("⚠️ Z-API fetch status:", r.status_code, r.text[:200])
-            return []
-        data = r.json()
-        if not isinstance(data, list):
-            return []
-        return data
+        r = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+              {"role":"system","content":"Você é o CADIIA. Responda em PT-BR, objetivo e direto."},
+              {"role":"user","content":prompt}
+            ],
+            temperature=0.4,
+        )
+        return r.choices[0].message.content.strip()
     except Exception as e:
-        print("⚠️ parse fetch:", e)
-        return []
+        print(f"⚠️ IA erro: {e}")
+        return "Tive um erro ao processar. Tente novamente."
 
-def send_text(chat_id: str, text: str):
-    phone = chat_id.replace("@c.us","").replace("@g.us","")
-    payload = {"phone": phone, "message": text}
-    r = zapi_post("/send-text", payload)
-    if r is None:
-        print("❌ send_text failed (no response)")
-        return False
-    if r.status_code not in (200,201):
-        print("❌ send_text status:", r.status_code, r.text[:200])
-        return False
-    return True
-
-# ---- OpenAI call (minimal, robust) ----
-def call_openai(prompt: str) -> str:
-    # Usar REST simples para evitar dependências extras; usa chave OPENAI_API
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
-    body = {
-        "model": "gpt-4o-mini",
-        "messages": [
-            {"role":"system","content":"Você é o assistente CADIIA. Responda em português, direto e objetivo."},
-            {"role":"user","content": prompt}
-        ],
-        "temperature": 0.3,
-        "max_tokens": 600
+def pegar_ultima():
+    data = zget("/last-received-messages")
+    if not isinstance(data, list) or not data:
+        return None
+    msg = data[-1]
+    return {
+        "id":   str(msg.get("id") or msg.get("messageId") or ""),
+        "from": str(msg.get("chatId") or msg.get("remoteJid") or ""),
+        "body": str(msg.get("body") or msg.get("text") or "").strip(),
+        "fromMe": bool(msg.get("fromMe", False))
     }
-    for attempt in range(1, MAX_RETRIES+1):
-        try:
-            r = requests.post(url, headers=headers, json=body, timeout=20)
-            if r.status_code == 200:
-                j = r.json()
-                return j["choices"][0]["message"]["content"].strip()
-            else:
-                print(f"⚠️ OpenAI status {r.status_code}: {r.text[:200]}")
-        except Exception as e:
-            print("⚠️ OpenAI erro:", e)
-        time.sleep(BACKOFF_BASE ** attempt)
-    return "Desculpe, erro ao processar sua solicitação."
 
-# ---- Regras aplicadas à mensagem ----
-def should_respond(msg: Dict) -> bool:
-    # identifica campos variáveis
-    body = (msg.get("body") or msg.get("text") or msg.get("message") or "").strip()
-    if not body:
-        return False
-    if "zumo" not in body.lower():
-        return False
-    chat_id = msg.get("chatId","")
-    is_group = "@g.us" in chat_id
-    from_me = bool(msg.get("fromMe") or msg.get("self") or False)
-    if from_me:
-        return False
-    # se grupo e MASTER_PHONE não está no chatId -> ignora
-    if is_group:
-        if MASTER_PHONE and MASTER_PHONE in chat_id:
-            return True
-        return False
-    # privado com 'zumo' -> responde
-    return True
+print("🟢 Loop 24/7 iniciado…")
+idle = 0
+while True:
+    try:
+        m = pegar_ultima()
+        if not m:
+            idle += 1
+            if idle % 60 == 0: print("⏳ aguardando…")
+            time.sleep(3)
+            continue
+        idle = 0
 
-# ---- Main loop ----
-print("🟢 Loop iniciado")
-try:
-    while True:
-        try:
-            msgs = fetch_messages()
-            # ordenar para determinismo (timestamp ou fallback)
-            def keyfn(m):
-                return int(m.get("timestamp") or m.get("id") or 0)
-            msgs.sort(key=keyfn)
-            for m in msgs:
-                # id único heurístico
-                mid = str(m.get("id") or m.get("messageId") or m.get("timestamp") or json.dumps(m))
-                if mid in seen:
-                    continue
-                seen.add(mid)
-                # persistir periodicamente
-                if len(seen) % 50 == 0:
-                    save_seen(seen)
+        # dedup
+        if last_id == m["id"] or not m["id"]:
+            time.sleep(2); continue
+        last_id = m["id"]
 
-                chat_id = m.get("chatId","")
-                body = (m.get("body") or m.get("text") or "").strip()
-                print("📩", chat_id, "->", body[:200])
+        numero = m["from"]
+        texto  = m["body"]
+        if not texto:
+            continue
 
-                if not should_respond(m):
-                    continue
+        # regra 1: só reage se contiver "zumo"
+        if "zumo" not in texto.lower():
+            continue
 
-                # gerar resposta IA (resiliência ao erro)
-                try:
-                    resp = call_openai(body)
-                except Exception as e:
-                    print("⚠️ Erro IA:", e)
-                    resp = "Erro interno ao gerar resposta."
+        # regra 2: NUNCA responder em grupos (exceto mestre)
+        if "@g.us" in numero and MASTER_PHONE not in numero:
+            print("🚫 Grupo ignorado (não é do mestre).")
+            continue
 
-                ok = send_text(chat_id, resp)
-                if not ok:
-                    print("⚠️ envio falhou para", chat_id)
-            # salvar vistos a cada ciclo
-            save_seen(seen)
-        except Exception:
-            print("‼️ erro ciclo:", traceback.format_exc())
-        print("⏰ tick")
-        time.sleep(CHECK_INTERVAL)
-except KeyboardInterrupt:
-    print("⛔ encerrado manualmente")
-except Exception:
-    print("⛔ encerrado por exceção", traceback.format_exc())
-finally:
-    save_seen(seen)
+        # regra 3: atender o mestre em qualquer contexto (já coberto acima)
+        print(f"📩 {numero} :: {texto}")
+
+        resposta = pedir_ia(texto)
+        enviar(numero, resposta)
+
+        time.sleep(2)
+
+    except Exception as e:
+        print(f"❌ Loop erro: {e}")
+        time.sleep(5)
