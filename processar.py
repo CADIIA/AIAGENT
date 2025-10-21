@@ -44,7 +44,7 @@ else:
 def verificar_mensagens():
     """Busca novas mensagens recebidas com robustez"""
     try:
-        r = requests.get(f"{URL_BASE}/last-received-messages", timeout=15)
+        r = requests.get(f"{URL_BASE}/chats/messages", timeout=15)
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, list) and len(data) > 0:
@@ -113,6 +113,7 @@ while True:
     enviar_resposta(numero, f"🤖 Zumo recebido: {msg}")
     limpar()
     time.sleep(3)
+
 
 
 
