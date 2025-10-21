@@ -3,39 +3,35 @@ name: CADIIA WhatsApp Agent
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/10 * * * *"  # reinicia a cada 10 minutos se travar
+    - cron: "*/10 * * * *"  # religa automaticamente a cada 10 min se cair
 
 jobs:
   agente:
     runs-on: ubuntu-latest
-    timeout-minutes: 355
+    timeout-minutes: 355  # ~6h
+
+    # impede múltiplas instâncias simultâneas
+    concurrency:
+      group: cadIIa-whatsapp
+      cancel-in-progress: true
 
     steps:
-      - name: Checkout do repositório
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Instalar dependências do sistema e pacotes
+      - name: Instalar dependências
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pip
+          python3 -V
+          pip install --upgrade pip
           pip install openai requests
-          npm install node-fetch
 
-      - name: Iniciar relay (Z-API)
+      - name: Iniciar CADIIA (loop contínuo)
         env:
-          ZAPI_INSTANCE: ${{ secrets.ZAPI_INSTANCE }}
-          ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
-        run: |
-          echo "🟢 Relay CADIIA iniciado..."
-          nohup node relay.js > relay.log 2>&1 &
-
-      - name: Iniciar processador (Python)
-        env:
-          ZAPI_INSTANCE: ${{ secrets.ZAPI_INSTANCE }}
-          ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
-          MASTER_PHONE: ${{ secrets.MASTER_PHONE }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ZAPI_INSTANCE:  ${{ secrets.ZAPI_INSTANCE }}
+          ZAPI_TOKEN:     ${{ secrets.ZAPI_TOKEN }}
+          MASTER_PHONE:   ${{ secrets.MASTER_PHONE }}
         run: |
           echo "🤖 CADIIA iniciando processamento contínuo..."
           python3 processar.py
