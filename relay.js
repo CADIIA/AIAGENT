@@ -1,66 +1,51 @@
-// ===============================
-// 🔁 relay.js — Z-API + GitHub Dispatch automático
-// ===============================
-
+// relay.js — coleta mensagens da Z-API e aciona processar.py via GitHub Actions
 import fetch from "node-fetch";
+import fs from "fs";
 
-// 🔧 Variáveis de ambiente obrigatórias
 const INSTANCE = process.env.ZAPI_INSTANCE;
 const TOKEN = process.env.ZAPI_TOKEN;
-const GH_TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN; // ✅ garante compatibilidade
-const REPO = "CADIIA/AIAGENT"; // ✅ define o repositório fixo manualmente (sem depender do runner)
+const GH_TOKEN = process.env.GH_TOKEN;
+const REPO = process.env.GITHUB_REPOSITORY;
 
-if (!INSTANCE || !TOKEN || !GH_TOKEN || !REPO) {
-  console.error("❌ Variáveis de ambiente ausentes.");
+if (!INSTANCE || !TOKEN) {
+  console.error("❌ Falta INSTANCE ou TOKEN da Z-API.");
   process.exit(1);
 }
 
-console.log("🟢 Relay iniciado — verificando mensagens a cada 10s...");
+console.log("🟢 Relay ativo — monitorando mensagens Z-API a cada 10s...");
 
 async function verificarMensagens() {
   try {
     const url = `https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/messages`;
-    const r = await fetch(url);
-    const mensagens = await r.json();
+    const res = await fetch(url);
+    const msgs = await res.json();
 
-    if (!Array.isArray(mensagens)) return;
+    if (!Array.isArray(msgs)) return;
 
-    for (const msg of mensagens) {
+    for (const msg of msgs) {
       if (!msg || !msg.phone || !msg.message) continue;
-      if (msg.fromMe) continue; // Ignora mensagens enviadas pelo bot
+      if (msg.fromMe) continue;
 
       const numero = msg.phone;
       const mensagem = msg.message.trim();
 
-      console.log(`📩 Nova mensagem: ${numero} => ${mensagem}`);
+      console.log(`📩 ${numero}: ${mensagem}`);
 
-      // 🚀 Dispara evento repository_dispatch no GitHub
-      const dispatchUrl = `https://api.github.com/repos/${REPO}/actions/workflows/whatsapp.yml/dispatches`;
-      const payload = {
-        ref: "main",
-        inputs: {},
-        event_type: "mensagem_recebida",
-        client_payload: { numero, mensagem },
-      };
+      // Salva mensagem no arquivo local
+      fs.writeFileSync("entrada.json", JSON.stringify({ numero, mensagem }));
 
-      const response = await fetch(dispatchUrl, {
+      // Envia resposta (opcional: pode ajustar o texto aqui)
+      await fetch(`https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/send-text`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${GH_TOKEN}`,
-          Accept: "application/vnd.github+json",
-        },
-        body: JSON.stringify(payload),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: numero,
+          message: "✅ Mensagem recebida. Processando..."
+        })
       });
-
-      if (response.status === 204) {
-        console.log("🚀 Workflow disparado com sucesso!");
-      } else {
-        const txt = await response.text();
-        console.error(`⚠️ Erro ao disparar workflow: ${response.status} - ${txt}`);
-      }
     }
-  } catch (e) {
-    console.error("⚠️ Erro ao verificar mensagens:", e.message);
+  } catch (err) {
+    console.error("⚠️ Erro ao consultar Z-API:", err.message);
   }
 }
 
