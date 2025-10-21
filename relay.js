@@ -16,8 +16,8 @@ console.log("🟢 Relay ativo — monitorando mensagens Z-API a cada 10s...");
 
 async function verificarMensagens() {
   try {
-    // ✅ endpoint atualizado (era /messages → agora é /receive-messages)
-    const url = `https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/receive-messages`;
+    // ✅ endpoint garantido para mensagens não lidas
+    const url = `https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/chat-messages/unread`;
     const res = await fetch(url);
     const msgs = await res.json();
 
@@ -25,25 +25,40 @@ async function verificarMensagens() {
 
     for (const msg of msgs) {
       if (!msg || !msg.phone || !msg.message) continue;
-      if (msg.fromMe) continue;
+      if (msg.fromMe || msg.isGroupMsg) continue; // ignora mensagens enviadas ou de grupos
 
       const numero = msg.phone;
       const mensagem = msg.message.trim();
 
       console.log(`📩 ${numero}: ${mensagem}`);
 
-      // Salva mensagem localmente
+      // apenas reage se contiver a palavra "zumo"
+      if (!mensagem.toLowerCase().includes("zumo")) continue;
+
       fs.writeFileSync("entrada.json", JSON.stringify({ numero, mensagem }));
 
-      // Envia resposta automática
-      await fetch(`https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/send-text`, {
+      // dispara workflow do GitHub
+      const dispatchUrl = `https://api.github.com/repos/${REPO}/dispatches`;
+      const payload = {
+        event_type: "mensagem_recebida",
+        client_payload: { numero, mensagem },
+      };
+
+      const gh = await fetch(dispatchUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          phone: numero,
-          message: "✅ Mensagem recebida. Processando..."
-        })
+        headers: {
+          Authorization: `Bearer ${GH_TOKEN}`,
+          Accept: "application/vnd.github+json",
+        },
+        body: JSON.stringify(payload),
       });
+
+      if (gh.status === 204) {
+        console.log("🚀 Workflow disparado com sucesso!");
+      } else {
+        const txt = await gh.text();
+        console.error(`⚠️ Erro ao disparar workflow: ${gh.status} - ${txt}`);
+      }
     }
   } catch (err) {
     console.error("⚠️ Erro ao consultar Z-API:", err.message);
