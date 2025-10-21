@@ -1,67 +1,89 @@
-# processar.py — núcleo CADIIA (responde mensagens via Z-API)
 import os
 import time
 import json
 import requests
 
-INSTANCE = os.getenv("ZAPI_INSTANCE")
-TOKEN = os.getenv("ZAPI_TOKEN")
+# ======================================
+# CONFIGURAÇÕES AUTOMÁTICAS
+# ======================================
+ZAPI_INSTANCE = os.getenv("ZAPI_INSTANCE")
+ZAPI_TOKEN = os.getenv("ZAPI_TOKEN")
+USUARIO_MESTRE = os.getenv("MASTER_PHONE")  # ex: 5581999999999
 
-print("🟢 CADIIA ativo — modo 24/7")
+if not ZAPI_INSTANCE or not ZAPI_TOKEN or not USUARIO_MESTRE:
+    print("❌ ERRO: variáveis de ambiente ausentes (ZAPI_INSTANCE, ZAPI_TOKEN, MASTER_PHONE)")
+    exit(1)
+
+URL_BASE = f"https://api.z-api.io/instances/{ZAPI_INSTANCE}/token/{ZAPI_TOKEN}"
+
+# ======================================
+# FUNÇÕES
+# ======================================
+
+def verificar_mensagens():
+    """Busca novas mensagens recebidas"""
+    try:
+        r = requests.get(f"{URL_BASE}/last-received-messages", timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, list) and len(data) > 0:
+                ultima = data[-1]
+                numero = ultima.get("chatId", "")
+                msg = ultima.get("body", "").strip()
+                return {"numero": numero, "mensagem": msg}
+    except Exception as e:
+        print(f"⚠️ Erro ao verificar mensagens: {e}")
+    return None
+
 
 def enviar_resposta(numero, texto):
-    url = f"https://api.z-api.io/instances/{INSTANCE}/token/{TOKEN}/send-text"
-    payload = {"phone": numero, "message": texto}
+    """Envia resposta de texto"""
     try:
-        requests.post(url, json=payload)
-        print(f"📤 Resposta enviada para {numero}: {texto}")
+        payload = {
+            "phone": numero.replace("@c.us", "").replace("@g.us", ""),
+            "message": texto
+        }
+        r = requests.post(f"{URL_BASE}/send-text", json=payload, timeout=10)
+        print(f"📤 [{r.status_code}] Resposta enviada: {texto}")
     except Exception as e:
-        print(f"⚠️ Erro ao enviar: {e}")
+        print(f"❌ Erro ao enviar mensagem: {e}")
 
-def ler_mensagem():
-    try:
-        if not os.path.exists("entrada.json"):
-            with open("entrada.json", "w") as f:
-                json.dump({}, f)
-            return None
-
-        with open("entrada.json", "r") as f:
-            data = json.load(f)
-            if not data or "mensagem" not in data:
-                return None
-            return data
-    except Exception as e:
-        print(f"⚠️ Erro ao ler entrada.json: {e}")
-        return None
 
 def limpar():
-    with open("entrada.json", "w") as f:
-        json.dump({}, f)
+    """Apenas log para manter ciclo ativo"""
+    print("♻️ Nenhuma nova mensagem... aguardando...")
+
+
+# ======================================
+# LOOP PRINCIPAL (NUNCA PARA)
+# ======================================
+print("🟢 CADIIA ativo — ciclo contínuo iniciado...")
 
 while True:
-    entrada = ler_mensagem()
-    if entrada:
-        numero = entrada["numero"]
-        msg = entrada["mensagem"].lower()
+    entrada = verificar_mensagens()
 
-        print(f"📨 Mensagem recebida de {numero}: {msg}")
+    if not entrada:
+        time.sleep(5)
+        continue
 
-        # Regras fixas
-        if "zumo" not in msg:
-            print("⏸ Ignorado — sem palavra-chave 'zumo'")
-            limpar()
-            time.sleep(5)
-            continue
+    numero = entrada["numero"]
+    msg = entrada["mensagem"].lower().strip()
 
-        if "@g.us" in numero:
-            print("⏸ Ignorado — mensagem de grupo")
-            limpar()
-            time.sleep(5)
-            continue
-
-        # Responde qualquer comando do usuário principal
-        resposta = f"🤖 CADIIA em operação — comando '{msg}' reconhecido."
-        enviar_resposta(numero, resposta)
+    # --- 1️⃣ Só reage se contiver 'zumo'
+    if "zumo" not in msg:
         limpar()
+        time.sleep(3)
+        continue
 
-    time.sleep(10)
+    # --- 2️⃣ Ignora grupos, exceto se for o dono
+    if "@g.us" in numero and USUARIO_MESTRE not in numero:
+        print("⏸ Ignorado — grupo comum")
+        limpar()
+        time.sleep(3)
+        continue
+
+    # --- 3️⃣ Atende o mestre em qualquer contexto
+    print(f"📩 Mensagem reconhecida de {numero}: {msg}")
+    enviar_resposta(numero, f"🤖 Zumo recebido: {msg}")
+    limpar()
+    time.sleep(3)
