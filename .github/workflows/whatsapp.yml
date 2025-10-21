@@ -1,18 +1,14 @@
 name: CADIIA WhatsApp Agent
 
-permissions:
-  contents: write
-  actions: write
-
 on:
   workflow_dispatch:
-  repository_dispatch:
-    types: [mensagem_recebida]
+  schedule:
+    - cron: "*/10 * * * *"  # backup a cada 10min caso pare
 
 jobs:
   agente:
     runs-on: ubuntu-latest
-    timeout-minutes: 355  # ~6h máximo permitido
+    timeout-minutes: 355  # limite máximo (~6h)
 
     steps:
       - uses: actions/checkout@v4
@@ -24,33 +20,12 @@ jobs:
           pip install openai requests
           npm install node-fetch
 
-      - name: Iniciar Relay
-        env:
-          ZAPI_INSTANCE: ${{ secrets.ZAPI_INSTANCE }}
-          ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
-          # ⚠️ usar GH_TOKEN personalizado, NÃO o automático do GitHub
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: node relay.js &
-
-      - name: Processar mensagens
+      - name: Iniciar ciclo CADIIA (Z-API + GitHub)
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ZAPI_INSTANCE: ${{ secrets.ZAPI_INSTANCE }}
           ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
-        run: python3 processar.py
-
-      - name: Reiniciar automaticamente
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "♻️ Reiniciando ciclo..."
-          curl -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/cadiia.yml/dispatches \
-            -d '{"ref": "main"}'
-
-
-
+          echo "🟢 CADIIA iniciando ciclo contínuo..."
+          node relay.js & python3 processar.py
