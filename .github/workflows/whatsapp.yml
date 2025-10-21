@@ -1,40 +1,58 @@
-# .github/workflows/whatsapp.yml
 name: CADIIA WhatsApp Agent
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - "processar.py"
+      - "relay.js"
+      - ".github/workflows/whatsapp.yml"
   schedule:
-    - cron: "*/5 * * * *" # reinicia a cada 5min para garantir continuidade
+    - cron: "*/10 * * * *"
 
+# 🔓 Nunca mais fica preso esperando outro job
 concurrency:
   group: cadiia-whatsapp
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   agente:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 355
+
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ZAPI_INSTANCE:  ${{ secrets.ZAPI_INSTANCE }}
+      ZAPI_TOKEN:     ${{ secrets.ZAPI_TOKEN }}
+      MASTER_PHONE:   ${{ secrets.MASTER_PHONE }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install deps
+      - name: Preparar SO (com retry)
         run: |
-          python -m pip install --upgrade pip
-          pip install --no-cache-dir requests openai
+          for i in 1 2 3; do
+            sudo apt-get update && sudo apt-get install -y python3-pip && break || sleep 5
+          done
 
-      - name: Run CADIIA
-        env:
-          ZAPI_INSTANCE: ${{ secrets.ZAPI_INSTANCE }}
-          ZAPI_TOKEN: ${{ secrets.ZAPI_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          MASTER_PHONE: ${{ secrets.MASTER_PHONE }}
+      - name: Instalar deps Python/Node (com retry)
         run: |
-          echo "🤖 CADIIA START"
-          python -u processar.py
+          python3 --version
+          python3 -m pip install --upgrade pip
+          for i in 1 2 3; do pip install openai requests httpx anyio || sleep 5; done
+          for i in 1 2 3; do npm install node-fetch || sleep 5; done
+
+      - name: Iniciar Relay (nohup + log)
+        run: |
+          echo "🟢 Relay CADIIA iniciado..."
+          nohup node relay.js > relay.log 2>&1 &
+
+      - name: Iniciar CADIIA (nohup + log)
+        run: |
+          echo "🤖 CADIIA iniciando processamento contínuo..."
+          nohup python3 processar.py > cadIIa.log 2>&1 &
+
+      - name: Segurar runner vivo (tail contínuo)
+        run: |
+          echo "📜 Logs em tempo real (Ctrl+C encerra):"
+          tail -F relay.log cadIIa.log
