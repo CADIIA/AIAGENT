@@ -1,73 +1,63 @@
-// relay.js — coleta mensagens da Z-API e aciona processar.py via GitHub Actions
-import fetch from "node-fetch";
+// relay.js — versão estável unificada (Z-API + GitHub Dispatch + compat geral)
+
 import fs from "fs";
+import fetch from "node-fetch";
 
 const INSTANCE = process.env.ZAPI_INSTANCE;
 const TOKEN = process.env.ZAPI_TOKEN;
 const GH_TOKEN = process.env.GH_TOKEN;
 const REPO = process.env.GITHUB_REPOSITORY;
 
-if (!INSTANCE || !TOKEN) {
-  console.error("❌ Falta INSTANCE ou TOKEN da Z-API.");
-  process.exit(1);
-}
+// endpoint universal que cobre /chats-messages/unread e /get-messages
+const urlBase = `https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}`;
 
-console.log("🟢 Relay ativo — monitorando mensagens Z-API a cada 10s...");
-
-async function verificarMensagens() {
+async function getMensagens() {
   try {
-    // ✅ endpoint garantido para mensagens não lidas
-    const url = `https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/chats-messages/unread`;
+    let resp = await fetch(`${urlBase}/chats-messages/unread`);
+    if (!resp.ok) resp = await fetch(`${urlBase}/get-messages`);
+    const data = await resp.json();
 
-    const res = await fetch(url);
-    const msgs = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return;
 
-    if (!Array.isArray(msgs)) return;
+    for (const msg of data) {
+      const texto = (msg.message || msg.text?.body || "").toLowerCase();
+      if (texto.includes("zumo") && !msg.fromMe) {
+        const payload = {
+          numero: msg.phone || msg.chatId || msg.remoteJid || "desconhecido",
+          mensagem: texto,
+        };
+        fs.writeFileSync("entrada.json", JSON.stringify(payload, null, 2));
+        console.log(`📩 ${payload.numero}: ${payload.mensagem}`);
 
-    for (const msg of msgs) {
-      if (!msg || !msg.phone || !msg.message) continue;
-      if (msg.fromMe || msg.isGroupMsg) continue; // ignora mensagens enviadas ou de grupos
+        // dispara o workflow com token pessoal ou GITHUB_TOKEN (agora permitido)
+        const dispatch = await fetch(
+          `https://api.github.com/repos/${REPO}/dispatches`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `token ${GH_TOKEN}`,
+              Accept: "application/vnd.github.v3+json",
+            },
+            body: JSON.stringify({
+              event_type: "mensagem_recebida",
+              client_payload: payload,
+            }),
+          }
+        );
 
-      const numero = msg.phone;
-      const mensagem = msg.message.trim();
-
-      console.log(`📩 ${numero}: ${mensagem}`);
-
-      // apenas reage se contiver a palavra "zumo"
-      if (!mensagem.toLowerCase().includes("zumo")) continue;
-
-      fs.writeFileSync("entrada.json", JSON.stringify({ numero, mensagem }));
-
-      // dispara workflow do GitHub
-      const dispatchUrl = `https://api.github.com/repos/${REPO}/dispatches`;
-      const payload = {
-        event_type: "mensagem_recebida",
-        client_payload: { numero, mensagem },
-      };
-
-      const gh = await fetch(dispatchUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${GH_TOKEN}`,
-          Accept: "application/vnd.github+json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (gh.status === 204) {
-        console.log("🚀 Workflow disparado com sucesso!");
-      } else {
-        const txt = await gh.text();
-        console.error(`⚠️ Erro ao disparar workflow: ${gh.status} - ${txt}`);
+        if (!dispatch.ok) {
+          const t = await dispatch.text();
+          console.error("❌ Falha ao disparar workflow:", dispatch.status, t);
+        } else {
+          console.log("🚀 Workflow disparado com sucesso!");
+        }
       }
     }
   } catch (err) {
-    console.error("⚠️ Erro ao consultar Z-API:", err.message);
+    console.error("⚠️ Erro geral no relay:", err.message);
   }
 }
 
-setInterval(verificarMensagens, 10000);
-verificarMensagens();
-
-
-
+// loop
+console.log("🟢 Relay ativo — monitorando mensagens Z-API a cada 10s...");
+setInterval(getMensagens, 10000);
