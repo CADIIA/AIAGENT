@@ -1,63 +1,62 @@
-// relay.js — versão estável unificada (Z-API + GitHub Dispatch + compat geral)
-
-import fs from "fs";
+// relay.js — coleta mensagens da Z-API e aciona processar.py via GitHub Actions
 import fetch from "node-fetch";
+import fs from "fs";
 
 const INSTANCE = process.env.ZAPI_INSTANCE;
 const TOKEN = process.env.ZAPI_TOKEN;
 const GH_TOKEN = process.env.GH_TOKEN;
 const REPO = process.env.GITHUB_REPOSITORY;
 
-// endpoint universal que cobre /chats-messages/unread e /get-messages
-const urlBase = `https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}`;
+if (!INSTANCE || !TOKEN || !GH_TOKEN || !REPO) {
+  console.error("❌ Variáveis de ambiente ausentes.");
+  process.exit(1);
+}
 
-async function getMensagens() {
+console.log("🟢 Relay ativo — monitorando mensagens Z-API a cada 10s...");
+
+async function verificarMensagens() {
   try {
-    let resp = await fetch(`${urlBase}/chats-messages/unread`);
-    if (!resp.ok) resp = await fetch(`${urlBase}/get-messages`);
-    const data = await resp.json();
+    const url = `https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/messages`;
+    const res = await fetch(url);
+    const msgs = await res.json();
 
-    if (!Array.isArray(data) || data.length === 0) return;
+    if (!Array.isArray(msgs)) return;
 
-    for (const msg of data) {
-      const texto = (msg.message || msg.text?.body || "").toLowerCase();
-      if (texto.includes("zumo") && !msg.fromMe) {
-        const payload = {
-          numero: msg.phone || msg.chatId || msg.remoteJid || "desconhecido",
-          mensagem: texto,
-        };
-        fs.writeFileSync("entrada.json", JSON.stringify(payload, null, 2));
-        console.log(`📩 ${payload.numero}: ${payload.mensagem}`);
+    for (const msg of msgs) {
+      if (!msg || !msg.phone || !msg.message) continue;
+      if (msg.fromMe || msg.isGroupMsg) continue;
 
-        // dispara o workflow com token pessoal ou GITHUB_TOKEN (agora permitido)
-        const dispatch = await fetch(
-          `https://api.github.com/repos/${REPO}/dispatches`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `token ${GH_TOKEN}`,
-              Accept: "application/vnd.github.v3+json",
-            },
-            body: JSON.stringify({
-              event_type: "mensagem_recebida",
-              client_payload: payload,
-            }),
-          }
-        );
+      const numero = msg.phone;
+      const mensagem = msg.message.trim();
 
-        if (!dispatch.ok) {
-          const t = await dispatch.text();
-          console.error("❌ Falha ao disparar workflow:", dispatch.status, t);
-        } else {
-          console.log("🚀 Workflow disparado com sucesso!");
-        }
-      }
+      console.log(`📩 ${numero}: ${mensagem}`);
+
+      if (!mensagem.toLowerCase().includes("zumo")) continue;
+
+      fs.writeFileSync("entrada.json", JSON.stringify({ numero, mensagem }));
+
+      const dispatchUrl = `https://api.github.com/repos/${REPO}/dispatches`;
+      const payload = {
+        event_type: "mensagem_recebida",
+        client_payload: { numero, mensagem },
+      };
+
+      const gh = await fetch(dispatchUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${GH_TOKEN}`,
+          Accept: "application/vnd.github+json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (gh.status === 204) console.log("🚀 Workflow disparado com sucesso!");
+      else console.error(`⚠️ Erro ao disparar workflow: ${gh.status}`);
     }
   } catch (err) {
-    console.error("⚠️ Erro geral no relay:", err.message);
+    console.error("⚠️ Erro ao consultar Z-API:", err.message);
   }
 }
 
-// loop
-console.log("🟢 Relay ativo — monitorando mensagens Z-API a cada 10s...");
-setInterval(getMensagens, 10000);
+setInterval(verificarMensagens, 10000);
+verificarMensagens();
