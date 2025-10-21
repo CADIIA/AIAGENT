@@ -1,57 +1,71 @@
-// relay.js
-// 🔁 Repassa as mensagens recebidas da Z-API direto para o GitHub Actions
+// ===============================
+// 🔁 relay.js — Agente Z-API + GitHub 24/7
+// ===============================
 
-import express from "express";
+import fs from "fs";
 import fetch from "node-fetch";
 
-const app = express();
-app.use(express.json());
+const INSTANCE = process.env.ZAPI_INSTANCE;
+const TOKEN = process.env.ZAPI_TOKEN;
+const GH_TOKEN = process.env.GH_TOKEN;
+const REPO = process.env.GITHUB_REPOSITORY;
 
-const GH_REPO = process.env.GITHUB_REPOSITORY || "CADIIA/AIAGENT";
-const GH_TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+if (!INSTANCE || !TOKEN || !GH_TOKEN || !REPO) {
+  console.error("❌ Variáveis de ambiente ausentes.");
+  process.exit(1);
+}
 
-// 🔔 Recebe mensagens enviadas pela Z-API
-app.post("/relay", async (req, res) => {
+console.log("🟢 Relay iniciado — monitorando mensagens a cada 10s...");
+
+async function verificarMensagens() {
   try {
-    const dados = req.body;
-    console.log("📩 Mensagem recebida via webhook:", dados);
+    const url = `https://api.z-api.io/instances/${INSTANCE}/token/${TOKEN}/messages`;
+    const r = await fetch(url);
+    const data = await r.json();
 
-    // Salva o conteúdo no arquivo entrada.json via workflow
-    const url = `https://api.github.com/repos/${GH_REPO}/actions/workflows/whatsapp.yml/dispatches`;
+    if (!data || !Array.isArray(data)) return;
 
-    const body = {
-      ref: "main",
-      inputs: {
-        mensagem: JSON.stringify(dados)
-      }
-    };
+    for (const msg of data) {
+      if (!msg || !msg.phone || !msg.message) continue;
+      if (msg.fromMe) continue; // Ignora mensagens enviadas pelo próprio bot
 
-    const r = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${GH_TOKEN}`,
-        "Accept": "application/vnd.github+json",
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(body)
-    });
+      const numero = msg.phone;
+      const mensagem = msg.message.trim();
 
-    if (r.status === 204) {
-      console.log("✅ Workflow disparado com sucesso!");
-      res.status(200).json({ ok: true });
-    } else {
-      const txt = await r.text();
-      console.log("⚠️ Falha ao disparar workflow:", txt);
-      res.status(500).json({ erro: txt });
+      // Salva no entrada.json
+      fs.writeFileSync(
+        "entrada.json",
+        JSON.stringify({ numero, mensagem }, null, 2),
+        "utf8"
+      );
+
+      console.log(`📩 Nova mensagem: ${numero} => ${mensagem}`);
+
+      // Commit no GitHub para disparar o workflow
+      await fetch(
+        `https://api.github.com/repos/${REPO}/contents/entrada.json`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${GH_TOKEN}`,
+            Accept: "application/vnd.github+json",
+          },
+          body: JSON.stringify({
+            message: `Atualização automática - ${new Date().toISOString()}`,
+            content: Buffer.from(
+              JSON.stringify({ numero, mensagem }, null, 2)
+            ).toString("base64"),
+          }),
+        }
+      );
+
+      console.log("🚀 Workflow disparado com sucesso.");
     }
   } catch (e) {
-    console.error("❌ Erro no relay:", e);
-    res.status(500).json({ erro: e.message });
+    console.error("⚠️ Erro ao verificar mensagens:", e.message);
   }
-});
+}
 
-// ✅ Mantém online
-app.get("/", (_, res) => res.send("🟢 Relay ativo e aguardando eventos da Z-API."));
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Relay escutando na porta ${PORT}`));
+// Loop a cada 10 segundos
+setInterval(verificarMensagens, 10000);
+verificarMensagens();
