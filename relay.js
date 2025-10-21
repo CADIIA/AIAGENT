@@ -4,10 +4,11 @@
 
 import fetch from "node-fetch";
 
+// 🔧 Variáveis de ambiente obrigatórias
 const INSTANCE = process.env.ZAPI_INSTANCE;
 const TOKEN = process.env.ZAPI_TOKEN;
-const GH_TOKEN = process.env.GH_TOKEN;
-const REPO = process.env.GITHUB_REPOSITORY;
+const GH_TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN; // ✅ garante compatibilidade
+const REPO = "CADIIA/AIAGENT"; // ✅ define o repositório fixo manualmente (sem depender do runner)
 
 if (!INSTANCE || !TOKEN || !GH_TOKEN || !REPO) {
   console.error("❌ Variáveis de ambiente ausentes.");
@@ -33,9 +34,11 @@ async function verificarMensagens() {
 
       console.log(`📩 Nova mensagem: ${numero} => ${mensagem}`);
 
-      // Dispara evento repository_dispatch no GitHub
-      const dispatchUrl = `https://api.github.com/repos/${REPO}/dispatches`;
+      // 🚀 Dispara evento repository_dispatch no GitHub
+      const dispatchUrl = `https://api.github.com/repos/${REPO}/actions/workflows/whatsapp.yml/dispatches`;
       const payload = {
+        ref: "main",
+        inputs: {},
         event_type: "mensagem_recebida",
         client_payload: { numero, mensagem },
       };
