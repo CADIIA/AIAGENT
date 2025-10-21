@@ -42,16 +42,21 @@ else:
 # FUNÇÕES
 # ======================================
 def verificar_mensagens():
-    """Busca novas mensagens recebidas"""
+    """Busca novas mensagens recebidas com robustez"""
     try:
         r = requests.get(f"{URL_BASE}/last-received-messages", timeout=15)
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, list) and len(data) > 0:
-                ultima = data[-1]
-                numero = ultima.get("chatId", "")
-                msg = ultima.get("body", "").strip()
-                return {"numero": numero, "mensagem": msg}
+                for msg in reversed(data[-5:]):  # analisa últimas 5 mensagens
+                    texto = msg.get("body") or msg.get("message") or ""
+                    if not texto:
+                        continue
+                    texto = texto.strip().lower()
+                    if "zumo" in texto:
+                        numero = msg.get("chatId", "")
+                        print(f"📨 Mensagem detectada: {texto} | de: {numero}")
+                        return {"numero": numero, "mensagem": texto}
     except Exception as e:
         print(f"⚠️ Erro ao verificar mensagens: {e}")
     return None
@@ -108,5 +113,6 @@ while True:
     enviar_resposta(numero, f"🤖 Zumo recebido: {msg}")
     limpar()
     time.sleep(3)
+
 
 
