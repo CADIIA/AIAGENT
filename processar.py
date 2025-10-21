@@ -28,17 +28,20 @@ print("✅ Ambiente pronto, iniciando CADIIA IA...")
 # FUNÇÕES
 # ==============================
 def verificar_mensagens():
-    """Busca novas mensagens (usando endpoint atualizado da Z-API)."""
+    """Busca novas mensagens (endpoint certo da tua instância)."""
     try:
-        r = requests.get(f"{URL_BASE}/chats/messages", timeout=15)
-        print("📡 Resposta da ZAPI:", r.status_code)
+        r = requests.get(f"{URL_BASE}/messages", timeout=15)
+        print("📡 Status:", r.status_code)
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, list) and len(data) > 0:
                 ultima = data[-1]
                 numero = ultima.get("chatId", "")
                 msg = ultima.get("body", "").strip()
+                print(f"📨 Nova mensagem recebida: {msg}")
                 return {"numero": numero, "mensagem": msg}
+        else:
+            print("⚠️ Resposta inesperada:", r.text)
     except Exception as e:
         print(f"⚠️ Erro ao verificar mensagens: {e}")
     return None
@@ -105,3 +108,4 @@ while True:
     resposta = gerar_resposta_ia(msg)
     enviar_resposta(numero, resposta)
     time.sleep(3)
+
